@@ -93,7 +93,8 @@ struct SlCommand {}
 /// Show a commit message and diff
 ///
 /// Like `sl show` / `git show`. Without a revision, the current
-/// commit (`.`). Not refreshed on an interval.
+/// commit (`.`), which is refreshed on the interval. A digest is
+/// captured once.
 #[derive(clap::Args, Debug)]
 #[clap(verbatim_doc_comment)]
 struct ShowCommand {
@@ -132,8 +133,8 @@ struct DiffCommand {
     rev: Option<String>,
 
     /// Show this commit's message and diff (`sl show`, `git show`).
-    /// The commit is immutable, so the diff is captured once and not
-    /// refreshed on an interval.
+    /// A digest is captured once. `.` (the working copy) is
+    /// refreshed on the interval.
     #[clap(
         short = 'c',
         long = "change",

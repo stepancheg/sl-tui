@@ -713,7 +713,7 @@ impl EventLoop {
         } else {
             "Enter: go to file"
         };
-        let mode = self.spec.lock().unwrap().mode_status();
+        let mode = self.spec.lock().unwrap().status_mode_text();
         if !force {
             let same_lines = self.help_renderer.lines() == lines.as_slice();
             let same_label = self.help_renderer.status_label() == Some(hint);
@@ -864,7 +864,7 @@ impl EventLoop {
     }
 
     fn sync_status_mode(&mut self) {
-        let text = self.spec.lock().unwrap().mode_status();
+        let text = self.spec.lock().unwrap().status_mode_text();
         self.renderer.set_status_mode(Some(text));
     }
 
@@ -1305,7 +1305,7 @@ impl EventLoop {
         if !force {
             let same_lines = self.help_renderer.lines() == lines.as_slice();
             let same_label = self.help_renderer.status_label() == Some(hint.as_str());
-            let same_mode = self.help_renderer.status_mode().is_none();
+            let same_mode = self.help_renderer.status_mode() == Some("(R)");
             if same_lines {
                 if same_label {
                     if same_mode {
@@ -1316,7 +1316,10 @@ impl EventLoop {
         }
         self.help_renderer.set_lines(lines);
         self.help_renderer.set_status_label(Some(hint));
-        self.help_renderer.set_status_mode(None);
+        // Tree poll is live; `(R)` sits in the status cluster, not in
+        // the Enter hint.
+        self.help_renderer
+            .set_status_mode(Some(String::from("(R)")));
         if let Some(index) = self.smartlog_sel.as_ref().and_then(|sel| sel.resolve(view)) {
             let row = commit_header_row(view, index);
             match keep_offset {

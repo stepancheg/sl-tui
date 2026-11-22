@@ -272,15 +272,19 @@ impl CaptureSpec {
         }
     }
 
-    fn is_live(&self) -> bool {
+    /// Whether the capture loop re-runs on the interval.
+    /// Working-copy diffs are live. A commit named by a symbolic
+    /// rev (`.` / `HEAD`) can move or be amended, so that is live
+    /// too. A digest or a PR diff is not.
+    pub(crate) fn is_live(&self) -> bool {
         match self {
             CaptureSpec::Live { .. } => true,
-            CaptureSpec::Commit { .. } => false,
+            CaptureSpec::Commit { tool, commit } => commit == current_commit_rev(*tool),
             CaptureSpec::Fixed { .. } => false,
         }
     }
 
-    /// Short name of this spec for the status bar.
+    /// Short name of this spec (no refresh marker).
     pub(crate) fn mode_status(&self) -> String {
         if let Some(kind) = self.view_kind() {
             return String::from(kind.label());
@@ -299,6 +303,16 @@ impl CaptureSpec {
             },
             CaptureSpec::Fixed { command } => fixed_command_status(command),
             CaptureSpec::Live { rev: None, .. } => String::from("diff -r ."),
+        }
+    }
+
+    /// Right-hand status-bar mode. Live specs append `(R)`.
+    pub(crate) fn status_mode_text(&self) -> String {
+        let base = self.mode_status();
+        if self.is_live() {
+            format!("{base} (R)")
+        } else {
+            base
         }
     }
 
@@ -324,9 +338,10 @@ pub(crate) async fn capture_command_output_loop(
     tx: Sender<DiffOutput>,
     refresh: NotifyRx,
 ) {
-    // A commit or PR diff is not the working copy. Do not poll, and do
-    // not list untracked files. `u`/`U` and `r` still re-run via
-    // `refresh`. The spec can change under `d`; re-read it each run.
+    // A fixed commit or PR diff is not polled, and untracked files
+    // are not listed for those. `u`/`U` and `r` still re-run via
+    // `refresh`. `.` / `HEAD` commit views are live. The spec can
+    // change under `d`; re-read it each run.
     let mut cached: Option<CachedSnapshot> = None;
     // An explicit refresh (mode switch, `r`, context change) may have
     // replaced the on-screen diff with a loading line. The next
@@ -351,9 +366,17 @@ pub(crate) async fn capture_command_output_loop(
         };
         // A failed listing leaves the diff without untracked paths.
         // An interrupt restarts the whole snapshot so the count matches it.
-        let untracked = match &spec {
-            CaptureSpec::Live { tool, .. } => {
-                let untracked_cmd = untracked_command_for_tool(*tool);
+        // Working-copy views (including `show .` / `diff -c .`) list
+        // untracked paths. A fixed commit or PR does not.
+        let untracked_tool = match &spec {
+            CaptureSpec::Live { tool, .. } => Some(*tool),
+            CaptureSpec::Commit { tool, .. } if spec.is_live() => Some(*tool),
+            CaptureSpec::Commit { .. } => None,
+            CaptureSpec::Fixed { .. } => None,
+        };
+        let untracked = match untracked_tool {
+            Some(tool) => {
+                let untracked_cmd = untracked_command_for_tool(tool);
                 match capture_stdout_interruptible(&untracked_cmd, Some(&refresh)).await {
                     Ok(CaptureOutcome::Interrupted) => {
                         force_send = true;
@@ -369,8 +392,7 @@ pub(crate) async fn capture_command_output_loop(
                     Err(_) => CachedUntracked::Failed,
                 }
             }
-            CaptureSpec::Commit { .. } => CachedUntracked::Ok(Vec::new()),
-            CaptureSpec::Fixed { .. } => CachedUntracked::Ok(Vec::new()),
+            None => CachedUntracked::Ok(Vec::new()),
         };
         let unchanged = match &cached {
             Some(prev) => {
@@ -577,7 +599,10 @@ mod tests {
             sl_change.command(3)
         );
         assert_eq!(Some(DiffViewKind::ChangeCurrent), sl_change.view_kind());
-        assert_eq!(false, sl_change.is_live());
+        assert_eq!(true, sl_change.is_live());
+        assert_eq!("diff -c .", sl_change.mode_status());
+        assert_eq!("diff -c . (R)", sl_change.status_mode_text());
+        assert_eq!("diff -r . (R)", sl_default.status_mode_text());
 
         let sl_prev = CaptureSpec::for_kind(DiffTool::Sl, DiffViewKind::RevPrev);
         assert_eq!(
@@ -593,6 +618,7 @@ mod tests {
         );
         assert_eq!(Some(DiffViewKind::RevPrev), sl_prev.view_kind());
         assert_eq!(true, sl_prev.is_live());
+        assert_eq!("diff -r prev", sl_prev.mode_status());
 
         let git_default = CaptureSpec::for_kind(DiffTool::Git, DiffViewKind::Default);
         assert_eq!(
@@ -617,6 +643,18 @@ mod tests {
             git_change.command(3)
         );
         assert_eq!(Some(DiffViewKind::ChangeCurrent), git_change.view_kind());
+        assert_eq!(true, git_change.is_live());
+        assert_eq!("diff -c .", git_change.mode_status());
+        assert_eq!("diff -c . (R)", git_change.status_mode_text());
+        let fixed = CaptureSpec::Commit {
+            tool: DiffTool::Sl,
+            commit: String::from("0123456789abcdef0123456789abcdef01234567"),
+        };
+        assert_eq!(false, fixed.is_live());
+        assert_eq!(
+            "diff -c 0123456789abcdef0123456789abcdef01234567",
+            fixed.mode_status()
+        );
 
         let git_prev = CaptureSpec::for_kind(DiffTool::Git, DiffViewKind::RevPrev);
         assert_eq!(
@@ -636,11 +674,13 @@ mod tests {
         assert_eq!("diff -r prev", sl_prev.mode_status());
         assert_eq!("diff -c .", git_change.mode_status());
         assert_eq!("diff -r prev", git_prev.mode_status());
+        assert_eq!("diff -r . (R)", sl_default.status_mode_text());
         let custom = CaptureSpec::Live {
             tool: DiffTool::Sl,
             rev: Some(String::from("main")),
         };
         assert_eq!("diff -r main", custom.mode_status());
+        assert_eq!("diff -r main (R)", custom.status_mode_text());
         let pr = CaptureSpec::Fixed {
             command: crate::repo::pr_diff::origin_pr_diff_command(41),
         };

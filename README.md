@@ -87,7 +87,7 @@ Global flags apply to every command.
 | Flag | Meaning |
 | --- | --- |
 | `-r`, `--rev` | Revision to compare against. Without this, the tool's default diff |
-| `-c`, `--change` | Commit message and diff for one commit. No live refresh |
+| `-c`, `--change` | Commit message and diff for one commit. `-c .` live-refreshes; a digest does not |
 | `-U`, `--unified` | Initial context lines (default 3) |
 | `--stat` | Open the diff stat view |
 | `--origin-pr N` | Origin PR diff (`origin pr diff N`). No live refresh |
