@@ -1,8 +1,8 @@
 # sl-tui
 
-A terminal UI for [Sapling](https://sapling-scm.com/). It shows the
-smartlog, a live working-copy diff, and a single commit or pull
-request, in one pager.
+A terminal UI for [Sapling](https://sapling-scm.com/). With no
+subcommand it opens the smartlog. `diff` (alias `di`) opens a live
+working-copy diff or a pull request. `show` opens one commit.
 
 While an agent is editing the tree, the diff is re-run on an interval.
 The smartlog is re-queried on that interval while it is open.
@@ -59,20 +59,39 @@ cargo install --git https://github.com/stepancheg/sl-tui
 
 or `bin/sl-tui`
 
+## Usage
+
+```
+sl-tui              smartlog (Sapling); diff if the repo is git-only
+sl-tui sl           smartlog (Sapling); same as no subcommand
+sl-tui diff         working-copy diff
+sl-tui di           same as diff
+sl-tui show [REV]   commit message and diff (default `.`)
+```
+
 ## Options
+
+Global flags apply to every command.
 
 | Flag | Meaning |
 | --- | --- |
 | `-n`, `--interval` | Seconds between runs (default `0.5`, or `LIVE_DIFF_INTERVAL`) |
+| `--sl` | Force Sapling |
+| `--git` | Force git |
+
+`show` takes an optional revision (`show REV` or `show -r REV`),
+`--stat`, and `-U`/`--unified`. With no revision it shows `.`.
+
+`diff` / `di` flags:
+
+| Flag | Meaning |
+| --- | --- |
 | `-r`, `--rev` | Revision to compare against. Without this, the tool's default diff |
 | `-c`, `--change` | Commit message and diff for one commit. No live refresh |
+| `-U`, `--unified` | Initial context lines (default 3) |
+| `--stat` | Open the diff stat view |
 | `--origin-pr N` | Origin PR diff (`origin pr diff N`). No live refresh |
 | `--github-pr N` | GitHub PR diff (`gh pr diff N`). No live refresh |
-| `-U`, `--unified` | Initial context lines (default 3). `u` / `U` change it later |
-| `--stat` | Open the diff stat view |
-| `--tree` | Open the smartlog view (Sapling) |
-| `--sl` | Force `sl diff` |
-| `--git` | Force `git diff` |
 
 ## Keys
 

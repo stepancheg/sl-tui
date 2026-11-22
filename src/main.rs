@@ -52,17 +52,74 @@ use crate::util::notify_pair::NotifyTx;
 #[derive(clap::Parser, Debug)]
 struct Args {
     /// Seconds between command runs.
-    #[clap(short = 'n', long, env = "LIVE_DIFF_INTERVAL", default_value = "0.5")]
+    #[clap(
+        short = 'n',
+        long,
+        env = "LIVE_DIFF_INTERVAL",
+        default_value = "0.5",
+        global = true
+    )]
     interval: IntervalArg,
 
-    /// Use `sl diff`.
-    #[clap(long, conflicts_with = "git")]
+    /// Use Sapling (`sl`).
+    #[clap(long, conflicts_with = "git", global = true)]
     sl: bool,
 
-    /// Use `git diff`.
-    #[clap(long, conflicts_with = "sl")]
+    /// Use git.
+    #[clap(long, conflicts_with = "sl", global = true)]
     git: bool,
 
+    #[clap(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    #[clap(visible_alias = "di")]
+    Diff(DiffCommand),
+
+    Show(ShowCommand),
+
+    Sl(SlCommand),
+}
+
+/// Open the smartlog
+///
+/// This is the default when no subcommand is given.
+#[derive(clap::Args, Debug)]
+#[clap(verbatim_doc_comment)]
+struct SlCommand {}
+
+/// Show a commit message and diff
+///
+/// Like `sl show` / `git show`. Without a revision, the current
+/// commit (`.`). Not refreshed on an interval.
+#[derive(clap::Args, Debug)]
+#[clap(verbatim_doc_comment)]
+struct ShowCommand {
+    /// Revision to show.
+    #[clap(short = 'r', long = "rev")]
+    rev: Option<String>,
+
+    /// Revision to show. Used when `-r` is not given.
+    #[clap(value_name = "REV")]
+    rev_pos: Option<String>,
+
+    /// Open the diff stat view.
+    #[clap(long)]
+    stat: bool,
+
+    /// Initial unified-diff context lines.
+    #[clap(short = 'U', long = "unified", default_value_t = DEFAULT_CONTEXT)]
+    context: u32,
+}
+
+/// Show a diff
+///
+/// Without `-r` or `-c`, the working-copy diff.
+#[derive(clap::Args, Debug)]
+#[clap(verbatim_doc_comment)]
+struct DiffCommand {
     /// Revision to compare the working copy against.
     /// Without this flag, run the tool's default diff.
     #[clap(
@@ -92,9 +149,7 @@ struct Args {
         long,
         conflicts_with = "github_pr",
         conflicts_with = "rev",
-        conflicts_with = "commit",
-        conflicts_with = "sl",
-        conflicts_with = "git"
+        conflicts_with = "commit"
     )]
     origin_pr: Option<u64>,
 
@@ -104,23 +159,17 @@ struct Args {
         long,
         conflicts_with = "origin_pr",
         conflicts_with = "rev",
-        conflicts_with = "commit",
-        conflicts_with = "sl",
-        conflicts_with = "git"
+        conflicts_with = "commit"
     )]
     github_pr: Option<u64>,
 
-    /// Initial unified-diff context lines. `u` / `U` change it later.
-    #[clap(short = 'U', long = "unified", default_value_t = DEFAULT_CONTEXT)]
-    context: u32,
-
     /// Open the diff stat view.
-    #[clap(long, conflicts_with = "tree")]
+    #[clap(long)]
     stat: bool,
 
-    /// Open the smartlog view. Requires a Sapling repository.
-    #[clap(long, conflicts_with = "stat", conflicts_with = "git")]
-    tree: bool,
+    /// Initial unified-diff context lines.
+    #[clap(short = 'U', long = "unified", default_value_t = DEFAULT_CONTEXT)]
+    context: u32,
 }
 
 fn install_panic_hook() {
@@ -143,19 +192,36 @@ async fn main() -> anyhow::Result<()> {
         CaptureSpec::Commit { tool, .. } => Some(*tool),
         CaptureSpec::Fixed { .. } => diff_tool().ok(),
     };
-    let start_view = if args.tree {
-        match menu_tool {
+    let start_view = match &args.command {
+        None => match menu_tool {
+            // No subcommand behaves as `sl`. A git-only repository
+            // has no smartlog, so open the diff.
             Some(DiffTool::Sl) => StartView::Tree,
-            Some(DiffTool::Git) => anyhow::bail!("--tree requires Sapling"),
-            None => anyhow::bail!("--tree requires a Sapling repository"),
+            Some(DiffTool::Git) => StartView::Diff,
+            None => StartView::Diff,
+        },
+        Some(Command::Sl(_)) => match menu_tool {
+            Some(DiffTool::Sl) => StartView::Tree,
+            Some(DiffTool::Git) => anyhow::bail!("sl requires a Sapling repository"),
+            None => anyhow::bail!("sl requires a Sapling repository"),
+        },
+        Some(Command::Diff(diff)) => {
+            if diff.stat {
+                StartView::Stat
+            } else {
+                StartView::Diff
+            }
         }
-    } else if args.stat {
-        StartView::Stat
-    } else {
-        StartView::Diff
+        Some(Command::Show(show)) => {
+            if show.stat {
+                StartView::Stat
+            } else {
+                StartView::Diff
+            }
+        }
     };
     let spec = Arc::new(Mutex::new(spec));
-    let context = Arc::new(AtomicU32::new(args.context.min(MAX_CONTEXT)));
+    let context = Arc::new(AtomicU32::new(initial_context(&args).min(MAX_CONTEXT)));
     let history = History::load_from_home().await;
 
     // Capture the first snapshot on the primary screen so the alternate
@@ -215,15 +281,42 @@ async fn main() -> anyhow::Result<()> {
     .await
 }
 
+fn initial_context(args: &Args) -> u32 {
+    match &args.command {
+        Some(Command::Diff(diff)) => diff.context,
+        Some(Command::Show(show)) => show.context,
+        Some(Command::Sl(_)) => DEFAULT_CONTEXT,
+        None => DEFAULT_CONTEXT,
+    }
+}
+
+/// Revision for `show`: `-r REV`, or a positional REV, or `.`.
+fn show_revision(show: &ShowCommand) -> anyhow::Result<String> {
+    match (&show.rev, &show.rev_pos) {
+        (Some(_), Some(_)) => {
+            anyhow::bail!("show: pass the revision with -r or as an argument, not both")
+        }
+        (Some(rev), None) => Ok(rev.clone()),
+        (None, Some(rev)) => Ok(rev.clone()),
+        (None, None) => Ok(String::from(".")),
+    }
+}
+
 /// PR diffs do not need a local repository. A working-copy or commit
 /// diff does, and that is when the sl/git tool is resolved.
 fn capture_spec(args: &Args) -> anyhow::Result<CaptureSpec> {
-    if let Some(number) = args.origin_pr {
+    let diff = match &args.command {
+        Some(Command::Diff(diff)) => Some(diff),
+        Some(Command::Show(_)) => None,
+        Some(Command::Sl(_)) => None,
+        None => None,
+    };
+    if let Some(number) = diff.and_then(|d| d.origin_pr) {
         return Ok(CaptureSpec::Fixed {
             command: origin_pr_diff_command(number),
         });
     }
-    if let Some(number) = args.github_pr {
+    if let Some(number) = diff.and_then(|d| d.github_pr) {
         return Ok(CaptureSpec::Fixed {
             command: github_pr_diff_command(number),
         });
@@ -235,7 +328,11 @@ fn capture_spec(args: &Args) -> anyhow::Result<CaptureSpec> {
     } else {
         diff_tool()?
     };
-    if let Some(commit) = &args.commit {
+    if let Some(Command::Show(show)) = &args.command {
+        let commit = show_revision(show)?;
+        return Ok(CaptureSpec::Commit { tool, commit });
+    }
+    if let Some(commit) = diff.and_then(|d| d.commit.as_ref()) {
         return Ok(CaptureSpec::Commit {
             tool,
             commit: commit.clone(),
@@ -243,7 +340,7 @@ fn capture_spec(args: &Args) -> anyhow::Result<CaptureSpec> {
     }
     Ok(CaptureSpec::Live {
         tool,
-        rev: args.rev.clone(),
+        rev: diff.and_then(|d| d.rev.clone()),
     })
 }
 
@@ -304,21 +401,80 @@ mod tests {
         assert_eq!(true, args.git);
     }
 
+    fn diff_args(args: &Args) -> &crate::DiffCommand {
+        match &args.command {
+            Some(crate::Command::Diff(diff)) => diff,
+            Some(crate::Command::Show(_)) => panic!("expected diff subcommand"),
+            Some(crate::Command::Sl(_)) => panic!("expected diff subcommand"),
+            None => panic!("expected diff subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_default_command_is_tree() {
+        let args = Args::try_parse_from(["sl-tui"]).unwrap();
+        assert_eq!(true, args.command.is_none());
+        let args = Args::try_parse_from(["sl-tui", "sl"]).unwrap();
+        assert_eq!(true, matches!(args.command, Some(crate::Command::Sl(_))));
+    }
+
+    #[test]
+    fn test_show_revision_parses() {
+        let args = Args::try_parse_from(["sl-tui", "show"]).unwrap();
+        let spec = crate::capture_spec(&args).unwrap();
+        match spec {
+            crate::capture::CaptureSpec::Commit { commit, .. } => {
+                assert_eq!(String::from("."), commit);
+            }
+            crate::capture::CaptureSpec::Live { .. } => panic!("expected commit"),
+            crate::capture::CaptureSpec::Fixed { .. } => panic!("expected commit"),
+        }
+        let args = Args::try_parse_from(["sl-tui", "show", "abc"]).unwrap();
+        match crate::capture_spec(&args).unwrap() {
+            crate::capture::CaptureSpec::Commit { commit, .. } => {
+                assert_eq!(String::from("abc"), commit);
+            }
+            _ => panic!("expected commit"),
+        }
+        let args = Args::try_parse_from(["sl-tui", "show", "-r", "main"]).unwrap();
+        match crate::capture_spec(&args).unwrap() {
+            crate::capture::CaptureSpec::Commit { commit, .. } => {
+                assert_eq!(String::from("main"), commit);
+            }
+            _ => panic!("expected commit"),
+        }
+        let args = Args::try_parse_from(["sl-tui", "show", "-r", "main", "abc"]).unwrap();
+        match &args.command {
+            Some(crate::Command::Show(show)) => {
+                assert_eq!(true, crate::show_revision(show).is_err());
+            }
+            _ => panic!("expected show"),
+        }
+    }
+
+    #[test]
+    fn test_diff_alias_di_parses() {
+        let args = Args::try_parse_from(["sl-tui", "di"]).unwrap();
+        assert_eq!(true, matches!(args.command, Some(crate::Command::Diff(_))));
+        let args = Args::try_parse_from(["sl-tui", "diff", "-c", "."]).unwrap();
+        assert_eq!(Some(String::from(".")), diff_args(&args).commit);
+    }
+
     #[test]
     fn test_rev_flag_parses() {
-        let args = Args::try_parse_from(["sl-tui", "-r", ".^"]).unwrap();
-        assert_eq!(Some(String::from(".^")), args.rev);
-        let args = Args::try_parse_from(["sl-tui", "--rev", "main"]).unwrap();
-        assert_eq!(Some(String::from("main")), args.rev);
-        let args = Args::try_parse_from(["sl-tui"]).unwrap();
-        assert_eq!(None, args.rev);
+        let args = Args::try_parse_from(["sl-tui", "diff", "-r", ".^"]).unwrap();
+        assert_eq!(Some(String::from(".^")), diff_args(&args).rev);
+        let args = Args::try_parse_from(["sl-tui", "diff", "--rev", "main"]).unwrap();
+        assert_eq!(Some(String::from("main")), diff_args(&args).rev);
+        let args = Args::try_parse_from(["sl-tui", "diff"]).unwrap();
+        assert_eq!(None, diff_args(&args).rev);
     }
 
     #[test]
     fn test_origin_pr_flag_parses() {
-        let args = Args::try_parse_from(["sl-tui", "--origin-pr", "41"]).unwrap();
-        assert_eq!(Some(41), args.origin_pr);
-        assert_eq!(None, args.github_pr);
+        let args = Args::try_parse_from(["sl-tui", "diff", "--origin-pr", "41"]).unwrap();
+        assert_eq!(Some(41), diff_args(&args).origin_pr);
+        assert_eq!(None, diff_args(&args).github_pr);
         let spec = crate::capture_spec(&args).unwrap();
         match spec {
             crate::capture::CaptureSpec::Fixed { command } => {
@@ -331,9 +487,9 @@ mod tests {
 
     #[test]
     fn test_github_pr_flag_parses() {
-        let args = Args::try_parse_from(["sl-tui", "--github-pr", "41"]).unwrap();
-        assert_eq!(Some(41), args.github_pr);
-        assert_eq!(None, args.origin_pr);
+        let args = Args::try_parse_from(["sl-tui", "diff", "--github-pr", "41"]).unwrap();
+        assert_eq!(Some(41), diff_args(&args).github_pr);
+        assert_eq!(None, diff_args(&args).origin_pr);
         let spec = crate::capture_spec(&args).unwrap();
         match spec {
             crate::capture::CaptureSpec::Fixed { command } => {
@@ -346,42 +502,51 @@ mod tests {
 
     #[test]
     fn test_pr_flags_conflict_with_each_other_and_rev() {
+        let err = Args::try_parse_from(["sl-tui", "diff", "--origin-pr", "1", "--github-pr", "2"])
+            .unwrap_err();
+        assert_eq!(true, err.to_string().contains("--origin-pr"));
         let err =
-            Args::try_parse_from(["sl-tui", "--origin-pr", "1", "--github-pr", "2"]).unwrap_err();
+            Args::try_parse_from(["sl-tui", "diff", "--origin-pr", "1", "-r", "main"]).unwrap_err();
         assert_eq!(true, err.to_string().contains("--origin-pr"));
-        let err = Args::try_parse_from(["sl-tui", "--origin-pr", "1", "-r", "main"]).unwrap_err();
-        assert_eq!(true, err.to_string().contains("--origin-pr"));
-        let err = Args::try_parse_from(["sl-tui", "--github-pr", "1", "-c", "abc"]).unwrap_err();
+        let err =
+            Args::try_parse_from(["sl-tui", "diff", "--github-pr", "1", "-c", "abc"]).unwrap_err();
         assert_eq!(true, err.to_string().contains("--github-pr"));
-        let err = Args::try_parse_from(["sl-tui", "--origin-pr", "1", "--sl"]).unwrap_err();
-        assert_eq!(true, err.to_string().contains("--origin-pr"));
     }
 
     #[test]
     fn test_unified_flag_parses() {
         let args = Args::try_parse_from(["sl-tui"]).unwrap();
-        assert_eq!(crate::repo::repo::DEFAULT_CONTEXT, args.context);
-        let args = Args::try_parse_from(["sl-tui", "-U", "0"]).unwrap();
-        assert_eq!(0, args.context);
-        let args = Args::try_parse_from(["sl-tui", "--unified", "12"]).unwrap();
-        assert_eq!(12, args.context);
+        assert_eq!(
+            crate::repo::repo::DEFAULT_CONTEXT,
+            crate::initial_context(&args)
+        );
+        let args = Args::try_parse_from(["sl-tui", "diff", "-U", "0"]).unwrap();
+        assert_eq!(0, diff_args(&args).context);
+        let args = Args::try_parse_from(["sl-tui", "diff", "--unified", "12"]).unwrap();
+        assert_eq!(12, diff_args(&args).context);
+        let args = Args::try_parse_from(["sl-tui", "show", "-U", "5"]).unwrap();
+        match &args.command {
+            Some(crate::Command::Show(show)) => assert_eq!(5, show.context),
+            _ => panic!("expected show"),
+        }
+        let err = Args::try_parse_from(["sl-tui", "-U", "3"]).unwrap_err();
+        assert_eq!(
+            true,
+            err.to_string().contains("-U") || err.to_string().contains("unified")
+        );
     }
 
     #[test]
-    fn test_stat_and_tree_flags_parse() {
-        let args = Args::try_parse_from(["sl-tui"]).unwrap();
-        assert_eq!(false, args.stat);
-        assert_eq!(false, args.tree);
-        let args = Args::try_parse_from(["sl-tui", "--stat"]).unwrap();
-        assert_eq!(true, args.stat);
-        assert_eq!(false, args.tree);
-        let args = Args::try_parse_from(["sl-tui", "--tree"]).unwrap();
-        assert_eq!(false, args.stat);
-        assert_eq!(true, args.tree);
-        let err = Args::try_parse_from(["sl-tui", "--stat", "--tree"]).unwrap_err();
-        assert_eq!(true, err.to_string().contains("--stat"));
-        let err = Args::try_parse_from(["sl-tui", "--tree", "--git"]).unwrap_err();
-        assert_eq!(true, err.to_string().contains("--tree"));
+    fn test_stat_flag_parses_on_diff() {
+        let args = Args::try_parse_from(["sl-tui", "diff"]).unwrap();
+        assert_eq!(false, diff_args(&args).stat);
+        let args = Args::try_parse_from(["sl-tui", "diff", "--stat"]).unwrap();
+        assert_eq!(true, diff_args(&args).stat);
+        let err = Args::try_parse_from(["sl-tui", "--stat"]).unwrap_err();
+        assert_eq!(
+            true,
+            err.to_string().contains("--stat") || err.to_string().contains("stat")
+        );
     }
 }
 
