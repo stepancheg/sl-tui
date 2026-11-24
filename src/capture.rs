@@ -580,6 +580,8 @@ mod tests {
                 String::from("diff"),
                 String::from("-U"),
                 String::from("3"),
+                String::from("--config"),
+                String::from("diff.showfunc=true"),
             ],
             sl_default.command(3)
         );
@@ -590,11 +592,18 @@ mod tests {
         assert_eq!(
             vec![
                 String::from("sl"),
-                String::from("show"),
-                String::from("-U"),
-                String::from("3"),
+                String::from("log"),
                 String::from("-r"),
                 String::from("."),
+                String::from("--patch"),
+                String::from("--config"),
+                String::from("diff.unified=3"),
+                String::from("--config"),
+                String::from("diff.showfunc=true"),
+                String::from("-T"),
+                String::from(
+                    "commit:      {node|short}\nuser:        {author}\ndate:        {date|isodate}\ndescription:\n{desc}\n\n"
+                ),
             ],
             sl_change.command(3)
         );
@@ -611,6 +620,8 @@ mod tests {
                 String::from("diff"),
                 String::from("-U"),
                 String::from("3"),
+                String::from("--config"),
+                String::from("diff.showfunc=true"),
                 String::from("-r"),
                 String::from("prev"),
             ],
@@ -635,7 +646,9 @@ mod tests {
         assert_eq!(
             vec![
                 String::from("git"),
-                String::from("show"),
+                String::from("log"),
+                String::from("-1"),
+                String::from("-p"),
                 String::from("--no-ext-diff"),
                 String::from("--unified=3"),
                 String::from("HEAD"),

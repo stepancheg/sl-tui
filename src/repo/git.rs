@@ -1,13 +1,15 @@
-/// Commit message and diff introduced by one commit (`git show`).
+/// Commit message and diff introduced by one commit (`git log -1 -p`).
 ///
-/// The default show format prints the message, author, and date, then
-/// the patch. That patch includes a root commit against the empty tree.
-/// `git diff REV^!` is only the patch, and for a root commit `REV^!` is
-/// just `REV`, so `git diff REV` compares that tree to the work tree.
+/// Same patch as `git show`: the message, then the diff, including a
+/// root commit against the empty tree. `git diff REV^!` is only the
+/// patch, and for a root commit `REV^!` is just `REV`, so `git diff
+/// REV` compares that tree to the work tree.
 pub(crate) fn git_commit_diff_command(context: u32, commit: &str) -> Vec<String> {
     vec![
         String::from("git"),
-        String::from("show"),
+        String::from("log"),
+        String::from("-1"),
+        String::from("-p"),
         String::from("--no-ext-diff"),
         format!("--unified={context}"),
         commit.to_owned(),

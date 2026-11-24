@@ -248,10 +248,10 @@ impl FileDiff {
 /// One row per file for the file-list mode, in `git diff --stat` form:
 /// a path column, `|`, the change count, and a `+`/`-` bar.
 /// `selected` is drawn with a grey / dark-grey background.
-/// Commit message taken from a `git show` / `sl show` preamble.
+/// Commit message taken from a `git log -1 -p` / `sl log --patch` preamble.
 /// Git indents the message with four spaces; sl emits a `description:`
 /// block. Trailing blank lines are dropped. Empty if the preamble is
-/// not a show header.
+/// not a commit header.
 pub(crate) fn commit_description_lines(preamble: &[String]) -> Vec<String> {
     if preamble.is_empty() {
         return Vec::new();
@@ -1874,52 +1874,46 @@ diff --git a/foo b/foo
         assert_eq!("(no files)", empty[0].plain_text());
     }
 
+    fn owned_lines(lines: &[&str]) -> Vec<String> {
+        lines.iter().map(|line| String::from(*line)).collect()
+    }
+
     #[test]
     fn test_commit_description_from_git_show_preamble() {
-        let preamble = vec![
-            String::from("commit 03446b88a53d3a3aa3ddf57bbc69db3e7c442967"),
-            String::from("Author: T <t@e>"),
-            String::from("Date:   Wed Jan 1 00:00:00 2020 +0000"),
-            String::from(""),
-            String::from("    subject line"),
-            String::from("    "),
-            String::from("    body paragraph"),
-            String::from("    second body"),
-            String::from(""),
-        ];
+        let preamble = owned_lines(&[
+            "commit 03446b88a53d3a3aa3ddf57bbc69db3e7c442967",
+            "Author: T <t@e>",
+            "Date:   Wed Jan 1 00:00:00 2020 +0000",
+            "",
+            "    subject line",
+            "    ",
+            "    body paragraph",
+            "    second body",
+            "",
+        ]);
         assert_eq!(
-            vec![
-                String::from("subject line"),
-                String::from(""),
-                String::from("body paragraph"),
-                String::from("second body"),
-            ],
+            owned_lines(&["subject line", "", "body paragraph", "second body"]),
             crate::diff::commit_description_lines(&preamble)
         );
     }
 
     #[test]
     fn test_commit_description_from_sl_show_preamble() {
-        let preamble = vec![
-            String::from("commit:      c4f82db4495f"),
-            String::from("user:        T <t@e>"),
-            String::from("date:        Tue Nov 17 20:17:16 2026 +0000"),
-            String::from("files:       a"),
-            String::from("description:"),
-            String::from("subject line"),
-            String::from(""),
-            String::from("body paragraph"),
-            String::from("second body"),
-            String::from(""),
-            String::from(""),
-        ];
+        let preamble = owned_lines(&[
+            "commit:      c4f82db4495f",
+            "user:        T <t@e>",
+            "date:        Tue Nov 17 20:17:16 2026 +0000",
+            "files:       a",
+            "description:",
+            "subject line",
+            "",
+            "body paragraph",
+            "second body",
+            "",
+            "",
+        ]);
         assert_eq!(
-            vec![
-                String::from("subject line"),
-                String::from(""),
-                String::from("body paragraph"),
-                String::from("second body"),
-            ],
+            owned_lines(&["subject line", "", "body paragraph", "second body"]),
             crate::diff::commit_description_lines(&preamble)
         );
     }

@@ -51,6 +51,14 @@ impl TestRepo {
         fs::write(path, contents).unwrap();
     }
 
+    /// `sl addremove` + `sl commit -m`, then the full node id of `.`.
+    pub(crate) fn sl_commit(&self, message: &str) -> String {
+        self.ok("sl", &["addremove"]);
+        self.ok("sl", &["commit", "-m", message]);
+        let hash = self.ok("sl", &["log", "-r", ".", "-T", "{node}\n"]);
+        hash.trim().to_owned()
+    }
+
     pub(crate) fn ok(&self, program: &str, args: &[&str]) -> String {
         String::from_utf8(self.run_program(program, args)).unwrap()
     }

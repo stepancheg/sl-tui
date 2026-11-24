@@ -28,33 +28,63 @@ enum Kind {
 }
 
 #[test]
-fn test_git_diff_command_worktree() {
-    check_diff_command_worktree(&Repo::init(Kind::Git));
+fn test_git_diff_command_worktree_clean() {
+    check_diff_command_worktree_clean(&Repo::init(Kind::Git));
 }
 
 #[test]
-fn test_sl_diff_command_worktree_sl_mode() {
-    check_diff_command_worktree(&Repo::init(Kind::Sl));
+fn test_sl_diff_command_worktree_clean_sl_mode() {
+    check_diff_command_worktree_clean(&Repo::init(Kind::Sl));
 }
 
 #[test]
-fn test_sl_diff_command_worktree_git_mode() {
-    check_diff_command_worktree(&Repo::init(Kind::SlOnGit));
+fn test_sl_diff_command_worktree_clean_git_mode() {
+    check_diff_command_worktree_clean(&Repo::init(Kind::SlOnGit));
 }
 
 #[test]
-fn test_git_diff_command_context() {
-    check_diff_command_context(&Repo::init(Kind::Git));
+fn test_git_diff_command_worktree_edit() {
+    check_diff_command_worktree_edit(&Repo::init(Kind::Git));
 }
 
 #[test]
-fn test_sl_diff_command_context_sl_mode() {
-    check_diff_command_context(&Repo::init(Kind::Sl));
+fn test_sl_diff_command_worktree_edit_sl_mode() {
+    check_diff_command_worktree_edit(&Repo::init(Kind::Sl));
 }
 
 #[test]
-fn test_sl_diff_command_context_git_mode() {
-    check_diff_command_context(&Repo::init(Kind::SlOnGit));
+fn test_sl_diff_command_worktree_edit_git_mode() {
+    check_diff_command_worktree_edit(&Repo::init(Kind::SlOnGit));
+}
+
+#[test]
+fn test_git_diff_command_context_zero() {
+    check_diff_command_context_zero(&Repo::init(Kind::Git));
+}
+
+#[test]
+fn test_sl_diff_command_context_zero_sl_mode() {
+    check_diff_command_context_zero(&Repo::init(Kind::Sl));
+}
+
+#[test]
+fn test_sl_diff_command_context_zero_git_mode() {
+    check_diff_command_context_zero(&Repo::init(Kind::SlOnGit));
+}
+
+#[test]
+fn test_git_diff_command_context_two() {
+    check_diff_command_context_two(&Repo::init(Kind::Git));
+}
+
+#[test]
+fn test_sl_diff_command_context_two_sl_mode() {
+    check_diff_command_context_two(&Repo::init(Kind::Sl));
+}
+
+#[test]
+fn test_sl_diff_command_context_two_git_mode() {
+    check_diff_command_context_two(&Repo::init(Kind::SlOnGit));
 }
 
 #[test]
@@ -70,6 +100,21 @@ fn test_sl_diff_command_rev_sl_mode() {
 #[test]
 fn test_sl_diff_command_rev_git_mode() {
     check_diff_command_rev(&Repo::init(Kind::SlOnGit));
+}
+
+#[test]
+fn test_git_diff_command_worktree_after_commit() {
+    check_diff_command_worktree_after_commit(&Repo::init(Kind::Git));
+}
+
+#[test]
+fn test_sl_diff_command_worktree_after_commit_sl_mode() {
+    check_diff_command_worktree_after_commit(&Repo::init(Kind::Sl));
+}
+
+#[test]
+fn test_sl_diff_command_worktree_after_commit_git_mode() {
+    check_diff_command_worktree_after_commit(&Repo::init(Kind::SlOnGit));
 }
 
 #[test]
@@ -132,13 +177,18 @@ fn test_sl_untracked_command_lists_paths_git_mode() {
     check_untracked_command_lists_paths(&Repo::init(Kind::SlOnGit));
 }
 
-fn check_diff_command_worktree(repo: &Repo) {
+fn check_diff_command_worktree_clean(repo: &Repo) {
     let dir = repo.path();
     write_file(dir, "a.txt", "one\ntwo\nthree\n");
     repo.commit("add a");
     let clean = repo.run_diff(repo.diff_command(3, None));
     assert_eq!(0, clean.files().len());
+}
 
+fn check_diff_command_worktree_edit(repo: &Repo) {
+    let dir = repo.path();
+    write_file(dir, "a.txt", "one\ntwo\nthree\n");
+    repo.commit("add a");
     write_file(dir, "a.txt", "one\nTWO\nthree\n");
     write_file(dir, "untracked.txt", "nope\n");
     let dirty = repo.run_diff(repo.diff_command(3, None));
@@ -157,12 +207,11 @@ fn check_diff_command_worktree(repo: &Repo) {
     );
 }
 
-fn check_diff_command_context(repo: &Repo) {
+fn check_diff_command_context_zero(repo: &Repo) {
     let dir = repo.path();
     write_file(dir, "a.txt", "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\n");
     repo.commit("add a");
     write_file(dir, "a.txt", "l1\nl2\nl3\nl4\nL5\nl6\nl7\nl8\nl9\n");
-
     let narrow = repo.run_diff(repo.diff_command(0, None));
     let narrow_files = narrow.files();
     assert_eq!(1, narrow_files.len());
@@ -173,7 +222,13 @@ fn check_diff_command_context(repo: &Repo) {
         ],
         hunk_lines(narrow_files[0])
     );
+}
 
+fn check_diff_command_context_two(repo: &Repo) {
+    let dir = repo.path();
+    write_file(dir, "a.txt", "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\n");
+    repo.commit("add a");
+    write_file(dir, "a.txt", "l1\nl2\nl3\nl4\nL5\nl6\nl7\nl8\nl9\n");
     let wide = repo.run_diff(repo.diff_command(2, None));
     let wide_files = wide.files();
     assert_eq!(1, wide_files.len());
@@ -197,7 +252,6 @@ fn check_diff_command_rev(repo: &Repo) {
     write_file(dir, "a.txt", "base\nsecond\n");
     repo.commit("second");
     write_file(dir, "a.txt", "base\nsecond\nworktree\n");
-
     let since_c1 = repo.run_diff(repo.diff_command(3, Some(&c1)));
     let files = since_c1.files();
     assert_eq!(1, files.len());
@@ -209,7 +263,15 @@ fn check_diff_command_rev(repo: &Repo) {
         ],
         hunk_lines(files[0])
     );
+}
 
+fn check_diff_command_worktree_after_commit(repo: &Repo) {
+    let dir = repo.path();
+    write_file(dir, "a.txt", "base\n");
+    repo.commit("base");
+    write_file(dir, "a.txt", "base\nsecond\n");
+    repo.commit("second");
+    write_file(dir, "a.txt", "base\nsecond\nworktree\n");
     let worktree_only = repo.run_diff(repo.diff_command(3, None));
     let worktree_files = worktree_only.files();
     assert_eq!(1, worktree_files.len());
@@ -229,12 +291,9 @@ fn check_commit_diff_command_one_commit(repo: &Repo) {
     repo.commit("first");
     write_file(dir, "a.txt", "one\nTWO\nthree\n");
     let c2 = repo.commit("second");
-    write_file(dir, "a.txt", "one\nTWO\nTHREE\n");
-    repo.commit("third");
-    write_file(dir, "a.txt", "one\nTWO\nTHREE\nworktree\n");
 
     let stdout = repo.run_ok(&repo.commit_diff_command(3, &c2));
-    assert_commit_message_before_diff(&stdout, "second");
+    assert_commit_diff_preamble(repo, &stdout, "second");
     let diff = parse_diff(&stdout);
     let files = diff.files();
     assert_eq!(1, files.len());
@@ -258,7 +317,7 @@ fn check_commit_diff_command_root(repo: &Repo) {
     write_file(dir, "a.txt", "one\ntwo\nworktree\n");
 
     let stdout = repo.run_ok(&repo.commit_diff_command(3, &c1));
-    assert_commit_message_before_diff(&stdout, "root");
+    assert_commit_diff_preamble(repo, &stdout, "root");
     let diff = parse_diff(&stdout);
     let files = diff.files();
     assert_eq!(1, files.len());
@@ -281,7 +340,7 @@ fn check_commit_diff_command_rename(repo: &Repo) {
     let c2 = repo.commit("rename");
 
     let stdout = repo.run_ok(&repo.commit_diff_command(3, &c2));
-    assert_commit_message_before_diff(&stdout, "rename");
+    assert_commit_diff_preamble(repo, &stdout, "rename");
     let diff = parse_diff(&stdout);
     let files = diff.files();
     assert_eq!(1, files.len());
@@ -383,18 +442,9 @@ impl Repo {
                 let hash = self.ok("git", &["rev-parse", "HEAD"]);
                 hash.trim().to_owned()
             }
-            Kind::Sl => self.sl_commit(message),
-            Kind::SlOnGit => self.sl_commit(message),
+            Kind::Sl => self.inner.sl_commit(message),
+            Kind::SlOnGit => self.inner.sl_commit(message),
         }
-    }
-
-    fn sl_commit(&self, message: &str) -> String {
-        // addremove picks up new files and renames; tracked edits are
-        // committed from the work tree without an extra add.
-        self.ok("sl", &["addremove"]);
-        self.ok("sl", &["commit", "-m", message]);
-        let hash = self.ok("sl", &["log", "-r", ".", "-T", "{node}\n"]);
-        hash.trim().to_owned()
     }
 
     fn ok(&self, program: &str, args: &[&str]) -> String {
@@ -419,13 +469,64 @@ fn write_file(dir: &Path, rel: &str, contents: &str) {
     fs::write(path, contents).unwrap();
 }
 
-fn assert_commit_message_before_diff(stdout: &[u8], message: &str) {
+/// Header before `diff --git`, compared for equality. Commit ids
+/// (and sl's isodate) are masked.
+fn assert_commit_diff_preamble(repo: &Repo, stdout: &[u8], message: &str) {
     let text = String::from_utf8_lossy(stdout);
     let Some(diff_at) = text.find("diff --git ") else {
         panic!("commit output had no diff --git header:\n{text}");
     };
     let preamble = &text[..diff_at];
-    assert_eq!(true, preamble.contains(message));
+    let expected = match repo.kind {
+        Kind::Git => format!(
+            "\
+commit HASH
+Author: Live Diff Test <live-diff-test@example.com>
+Date:   Wed Jan 1 00:00:00 2020 +0000
+
+    {message}
+
+"
+        ),
+        Kind::Sl | Kind::SlOnGit => format!(
+            "\
+commit:      HASH
+user:        Live Diff Test <live-diff-test@example.com>
+date:        DATE
+description:
+{message}
+
+"
+        ),
+    };
+    assert_eq!(expected, mask_commit_diff_preamble(repo.kind, preamble));
+}
+
+fn mask_commit_diff_preamble(kind: Kind, preamble: &str) -> String {
+    let mut out = String::new();
+    for line in preamble.lines() {
+        match kind {
+            Kind::Git => {
+                if line.starts_with("commit ") {
+                    out.push_str("commit HASH\n");
+                } else {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            Kind::Sl | Kind::SlOnGit => {
+                if line.starts_with("commit:") {
+                    out.push_str("commit:      HASH\n");
+                } else if line.starts_with("date:") {
+                    out.push_str("date:        DATE\n");
+                } else {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out
 }
 
 fn hunk_lines(file: &FileDiff) -> Vec<(HunkLineKind, String)> {
